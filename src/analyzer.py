@@ -51,7 +51,10 @@ from src.llm.hermes import (
     sanitize_hermes_error_text,
 )
 from src.llm.generation_params import apply_litellm_generation_params
-from src.llm.errors import call_litellm_with_param_recovery
+from src.llm.errors import (
+    call_litellm_with_param_recovery, is_permanent_llm_error,
+    llm_http_status, safe_llm_endpoint,
+)
 from src.llm.backend_registry import (
     LOCAL_CLI_GENERATION_BACKEND_IDS,
     LITELLM_BACKEND_ID,
@@ -3767,6 +3770,9 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                             progress_callback=stream_progress_callback,
                         )
                     except _LiteLLMStreamError as exc:
+                        cause = exc.__cause__ or exc
+                        if is_permanent_llm_error(cause):
+                            raise cause
                         safe_error = self._sanitize_litellm_exception_text(exc, config=config, model=model)
                         if exc.partial_received:
                             logger.warning(
@@ -3782,6 +3788,8 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                             )
                         last_error = RuntimeError(f"{type(exc).__name__}: {safe_error}")
                     except Exception as exc:
+                        if is_permanent_llm_error(exc):
+                            raise
                         safe_error = self._sanitize_litellm_exception_text(exc, config=config, model=model)
                         logger.warning(
                             "[LiteLLM] %s stream request failed before first chunk, falling back to non-stream: %s",
@@ -3866,7 +3874,19 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                     if router_provider:
                         last_provider = router_provider
                 safe_error = self._sanitize_litellm_exception_text(e, config=config, model=model)
-                logger.warning("[LiteLLM] %s failed: %s", model, safe_error)
+                endpoints = [call_kwargs.get("api_base")]
+                if uses_router:
+                    endpoints = [
+                        (deployment.get("litellm_params") or {}).get("api_base")
+                        for deployment in recovery_model_list
+                        if deployment.get("model_name") == model
+                    ]
+                logger.warning(
+                    "[LiteLLM] model=%s error_type=%s http_status=%s endpoints=%s failed: %s",
+                    self._sanitize_litellm_exception_text(model, config=config, model=model),
+                    type(e).__name__, llm_http_status(e),
+                    sorted({safe_llm_endpoint(url) for url in endpoints}), safe_error,
+                )
                 last_error = RuntimeError(f"{type(e).__name__}: {safe_error}")
                 continue
 

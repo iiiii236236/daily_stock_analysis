@@ -94,7 +94,7 @@ class WechatSender:
         try:
             return self._send_wechat_message(sanitized_content, timeout_seconds=timeout_seconds)
         except Exception as e:
-            logger.error(f"发送企业微信消息失败: {e}")
+            logger.error("发送企业微信消息失败: error_type=%s", type(e).__name__)
             return False
 
     def _send_wechat_image(self, image_bytes: bytes) -> bool:
@@ -122,12 +122,12 @@ class WechatSender:
                 if result.get("errcode") == 0:
                     logger.info("企业微信图片发送成功")
                     return True
-                logger.error("企业微信图片发送失败: %s", result.get("errmsg", ""))
+                logger.error("企业微信图片发送失败: errcode=%s", result.get("errcode"))
             else:
                 logger.error("企业微信请求失败: HTTP %s", response.status_code)
             return False
         except Exception as e:
-            logger.error("企业微信图片发送异常: %s", e)
+            logger.error("企业微信图片发送异常: error_type=%s", type(e).__name__)
             return False
     
     def _send_wechat_message(self, content: str, *, timeout_seconds: Optional[float] = None) -> bool:
@@ -147,7 +147,7 @@ class WechatSender:
                 logger.info("企业微信消息发送成功")
                 return True
             else:
-                logger.error(f"企业微信返回错误: {result}")
+                logger.error("企业微信返回错误: errcode=%s", result.get("errcode"))
                 return False
         else:
             logger.error(f"企业微信请求失败: {response.status_code}")

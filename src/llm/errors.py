@@ -4,7 +4,41 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
 from typing import Any, Callable, Dict, List, Optional
+
+
+def llm_http_status(error: BaseException) -> Optional[int]:
+    """Read structured status only; never parse or log provider response bodies."""
+    for source in (error, getattr(error, "response", None)):
+        status = getattr(source, "status_code", None)
+        if isinstance(status, int):
+            return status
+    return None
+
+
+def is_permanent_llm_error(error: BaseException) -> bool:
+    """Authentication and route failures cannot be fixed by changing transport."""
+    if llm_http_status(error) in (401, 402, 403, 404, 422):
+        return True
+    # Some compatible providers/LiteLLM versions wrap authentication as HTTP 400.
+    text = str(error).lower()
+    return any(marker in text for marker in (
+        "authentication fails", "authentication failed", "invalid api key",
+        "incorrect api key", "insufficient balance",
+    ))
+
+
+def safe_llm_endpoint(value: Any) -> str:
+    """Expose origin only: URL paths, userinfo and queries can contain secrets."""
+    try:
+        parsed = urlsplit(str(value or ""))
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return "provider-default"
+        port = f":{parsed.port}" if parsed.port else ""
+        return f"{parsed.scheme}://{parsed.hostname}{port}"
+    except ValueError:
+        return "invalid-url"
 
 from src.llm.generation_params import (
     GenerationParamRecovery,

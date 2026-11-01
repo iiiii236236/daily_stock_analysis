@@ -8,6 +8,11 @@ on:
   # 手动触发
   workflow_dispatch:
     inputs:
+      stocks:
+        description: '本次股票代码（留空使用 STOCK_LIST；首次测试填写 600519）'
+        required: false
+        default: ''
+        type: string
       mode:
         description: '运行模式'
         required: true
@@ -424,6 +429,7 @@ jobs:
           # ==========================================
           # 避免直接写入 STOCK_LIST，保留同名 Environment variables 的 runner 环境值。
           STOCK_LIST_CONFIG: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
+          INPUT_STOCKS: ${{ inputs.stocks }}
           MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'cn' }}
           MARKET_REVIEW_COLOR_SCHEME: ${{ vars.MARKET_REVIEW_COLOR_SCHEME || secrets.MARKET_REVIEW_COLOR_SCHEME || 'green_up' }}
           
@@ -455,7 +461,9 @@ jobs:
           # 1. Repository/Environment secrets 或 Repository variables（STOCK_LIST_CONFIG）
           # 2. 同名 Environment variables 注入的 runner 环境变量（STOCK_LIST）
           # 3. 最小默认值
-          if [ -n "${STOCK_LIST_CONFIG:-}" ]; then
+          if [ -n "${INPUT_STOCKS:-}" ]; then
+            export STOCK_LIST="$INPUT_STOCKS"
+          elif [ -n "${STOCK_LIST_CONFIG:-}" ]; then
             export STOCK_LIST="$STOCK_LIST_CONFIG"
           elif [ -z "${STOCK_LIST:-}" ]; then
             export STOCK_LIST="600519"

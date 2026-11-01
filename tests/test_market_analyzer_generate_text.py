@@ -112,6 +112,28 @@ _OPENAI_COMPATIBILITY_PAYLOAD_FIXTURES = [
 # ---------------------------------------------------------------------------
 
 class TestAnalyzerGenerateText:
+    @pytest.mark.parametrize("status,message", [
+        (401, "unauthorized"), (403, "forbidden"), (404, "model missing"),
+        (400, "Authentication Fails, Your api key: fake-key"),
+    ])
+    def test_permanent_stream_failure_does_not_repeat_non_stream(self, status, message, caplog):
+        from src.analyzer import _AllModelsFailedError
+        analyzer = self._make_analyzer()
+        analyzer._config_override = SimpleNamespace(
+            litellm_model="openai/deepseek-flash", litellm_fallback_models=[],
+            llm_model_list=[], openai_api_keys=["fake-key"],
+            openai_base_url="https://api.deepseek.com/v1",
+        )
+        error = RuntimeError(message)
+        error.status_code = status
+        with patch.object(analyzer, "_dispatch_litellm_completion", side_effect=error) as dispatch:
+            with pytest.raises(_AllModelsFailedError, match="All LLM models failed"):
+                analyzer._call_litellm("prompt", {"max_tokens": 128}, stream=True)
+        assert dispatch.call_count == 1
+        assert "fake-key" not in caplog.text
+        assert f"http_status={status}" in caplog.text
+        assert "https://api.deepseek.com" in caplog.text
+
     def _make_analyzer(self):
         """Return a minimally configured GeminiAnalyzer with _call_litellm mocked."""
         with patch("src.analyzer.get_config") as mock_cfg:

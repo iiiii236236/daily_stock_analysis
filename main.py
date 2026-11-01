@@ -1231,6 +1231,14 @@ def run_full_analysis(
             and not skip_futu_stock_analysis
         )
         deferred_failure_result = None
+        if expected_stock_report and not _all_stock_targets_succeeded(stock_codes, results):
+            _LAST_ANALYSIS_FAILURE_REASON = "stock_analysis_failed"
+            logger.error(
+                "本轮个股分析未全部成功：请求 %d 个标的，成功 %d 个；"
+                "请查看各股票的模型/数据源错误。大盘复盘和已成功报告仍继续推送。",
+                len(stock_codes), len(results),
+            )
+            deferred_failure_result = False
         if expected_stock_report and results and not getattr(
             pipeline, "_last_local_report_path", None
         ):

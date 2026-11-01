@@ -2431,6 +2431,39 @@ class MainScheduleModeTestCase(unittest.TestCase):
             ]
         )
 
+    def test_stock_failure_is_not_hidden_by_successful_market_report(self) -> None:
+        for successful_codes in ([], ["600519"]):
+            with self.subTest(successful_codes=successful_codes):
+                config = self._make_config(
+                    trading_day_check_enabled=False, market_review_enabled=True,
+                    daily_market_context_enabled=False, single_stock_notify=False,
+                    merge_email_notification=True, analysis_delay=0, report_type="simple",
+                    database_path=str(Path(self.temp_dir.name) / "stock_analysis.db"),
+                )
+                pipeline = MagicMock()
+                pipeline.run.return_value = [
+                    SimpleNamespace(code=code, sentiment_score=65, name=code,
+                                    operation_advice="持有", trend_prediction="震荡")
+                    for code in successful_codes
+                ]
+                pipeline.notifier.generate_aggregate_report.return_value = "个股报告"
+                pipeline.notifier.is_available.return_value = True
+                with (
+                    patch.object(main, "_refresh_stock_index_cache_for_analysis"),
+                    patch.object(main, "_run_auto_backtest"),
+                    patch.object(main, "_compute_trading_day_filter",
+                                 return_value=(["600519", "000001"], "cn", False)),
+                    patch("src.core.pipeline.StockAnalysisPipeline", return_value=pipeline),
+                    patch.object(main, "_run_market_review_with_shared_lock", return_value="大盘报告"),
+                    patch.object(main, "record_analysis_run_marker") as marker,
+                ):
+                    result = main.run_full_analysis(config, self._make_args(), ["600519", "000001"])
+                self.assertFalse(result)
+                self.assertEqual(main._LAST_ANALYSIS_FAILURE_REASON, "stock_analysis_failed")
+                pipeline.notifier.send.assert_called_once()
+                self.assertIn("大盘报告", pipeline.notifier.send.call_args.args[0])
+                marker.assert_not_called()
+
     def test_run_full_analysis_reuses_cached_market_context_as_full_report(self) -> None:
         args = self._make_args()
         target_date = date(2026, 3, 26)

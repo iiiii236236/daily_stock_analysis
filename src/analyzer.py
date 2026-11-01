@@ -51,7 +51,7 @@ from src.llm.hermes import (
     sanitize_hermes_error_text,
 )
 from src.llm.generation_params import apply_litellm_generation_params
-from src.llm.errors import call_litellm_with_param_recovery
+from src.llm.errors import call_litellm_with_param_recovery, is_non_retryable_llm_error, llm_error_status
 from src.llm.backend_registry import (
     LOCAL_CLI_GENERATION_BACKEND_IDS,
     LITELLM_BACKEND_ID,
@@ -3074,6 +3074,42 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
         sanitized = sanitize_hermes_error_text(exc, redaction_values=redactions)
         return redact_diagnostic_text(sanitized, limit=500)
 
+    def _litellm_error_endpoint(self, config: Config, model: str, exc: BaseException) -> str:
+        """Prefer the failing request URL; never log URL credentials or query strings."""
+        from urllib.parse import urlsplit, urlunsplit
+
+        request = getattr(exc, "request", None)
+        if request is None:
+            try:
+                request = getattr(getattr(exc, "response", None), "request", None)
+            except RuntimeError:  # httpx.Response may not have an attached request.
+                request = None
+        urls = [str(getattr(request, "url", "") or "")]
+        if not urls[0]:
+            origins = route_deployment_origins(config.llm_model_list or [], model)
+            urls = [
+                str((entry.get("litellm_params") or {}).get("api_base") or "")
+                for entry in (*origins.hermes_deployments, *origins.non_hermes_deployments)
+            ]
+            if not any(urls):
+                urls = [str(getattr(config, "openai_base_url", "") or "")] if model.startswith("openai/") else []
+        endpoints = []
+        for url in urls:
+            if not url:
+                continue
+            try:
+                parsed = urlsplit(url)
+                host = parsed.hostname or ""
+                if parsed.port:
+                    host = f"{host}:{parsed.port}"
+                endpoint = urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+                endpoint = self._sanitize_litellm_exception_text(endpoint, config=config, model=model)
+            except ValueError:
+                endpoint = "<invalid-url>"
+            if endpoint not in endpoints:
+                endpoints.append(endpoint)
+        return ",".join(endpoints) or "provider-default"
+
     def _dispatch_litellm_completion(
         self,
         model: str,
@@ -3767,6 +3803,8 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                             progress_callback=stream_progress_callback,
                         )
                     except _LiteLLMStreamError as exc:
+                        if is_non_retryable_llm_error(exc):
+                            raise
                         safe_error = self._sanitize_litellm_exception_text(exc, config=config, model=model)
                         if exc.partial_received:
                             logger.warning(
@@ -3782,6 +3820,8 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                             )
                         last_error = RuntimeError(f"{type(exc).__name__}: {safe_error}")
                     except Exception as exc:
+                        if is_non_retryable_llm_error(exc):
+                            raise
                         safe_error = self._sanitize_litellm_exception_text(exc, config=config, model=model)
                         logger.warning(
                             "[LiteLLM] %s stream request failed before first chunk, falling back to non-stream: %s",
@@ -3866,8 +3906,15 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                     if router_provider:
                         last_provider = router_provider
                 safe_error = self._sanitize_litellm_exception_text(e, config=config, model=model)
-                logger.warning("[LiteLLM] %s failed: %s", model, safe_error)
-                last_error = RuntimeError(f"{type(e).__name__}: {safe_error}")
+                # Structured fields survive provider messages that truncate or redact the key.
+                source_error = e.__cause__ if isinstance(e, _LiteLLMStreamError) and e.__cause__ else e
+                error_details = (
+                    f"type={type(source_error).__name__} status={llm_error_status(e) or 'unknown'} "
+                    f"model={self._sanitize_litellm_exception_text(model, config=config, model=model)} "
+                    f"endpoint={self._litellm_error_endpoint(config, model, source_error)}"
+                )
+                logger.warning("[LiteLLM] %s failed: %s", error_details, safe_error)
+                last_error = RuntimeError(f"{error_details}: {safe_error}")
                 continue
 
         raise _AllModelsFailedError(

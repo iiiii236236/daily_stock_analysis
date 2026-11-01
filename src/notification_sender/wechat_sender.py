@@ -87,14 +87,14 @@ class WechatSender:
 
         # 检查字节长度，超长则分批发送
         content_bytes = len(sanitized_content.encode('utf-8'))
-        if content_bytes > max_bytes:
-            logger.info(f"消息内容超长({content_bytes}字节/{len(content)}字符)，将分批发送")
-            return self._send_wechat_chunked(sanitized_content, max_bytes)
-        
         try:
+            if content_bytes > max_bytes:
+                logger.info(f"消息内容超长({content_bytes}字节/{len(content)}字符)，将分批发送")
+                return self._send_wechat_chunked(sanitized_content, max_bytes)
             return self._send_wechat_message(sanitized_content, timeout_seconds=timeout_seconds)
         except Exception as e:
-            logger.error(f"发送企业微信消息失败: {e}")
+            logger.error("发送企业微信消息失败: type=%s status=%s", type(e).__name__,
+                         getattr(getattr(e, "response", None), "status_code", None))
             return False
 
     def _send_wechat_image(self, image_bytes: bytes) -> bool:
@@ -122,12 +122,13 @@ class WechatSender:
                 if result.get("errcode") == 0:
                     logger.info("企业微信图片发送成功")
                     return True
-                logger.error("企业微信图片发送失败: %s", result.get("errmsg", ""))
+                logger.error("企业微信图片发送失败: errcode=%s", result.get("errcode"))
             else:
                 logger.error("企业微信请求失败: HTTP %s", response.status_code)
             return False
         except Exception as e:
-            logger.error("企业微信图片发送异常: %s", e)
+            logger.error("企业微信图片发送异常: type=%s status=%s", type(e).__name__,
+                         getattr(getattr(e, "response", None), "status_code", None))
             return False
     
     def _send_wechat_message(self, content: str, *, timeout_seconds: Optional[float] = None) -> bool:
@@ -147,7 +148,7 @@ class WechatSender:
                 logger.info("企业微信消息发送成功")
                 return True
             else:
-                logger.error(f"企业微信返回错误: {result}")
+                logger.error("企业微信返回错误: errcode=%s", result.get('errcode'))
                 return False
         else:
             logger.error(f"企业微信请求失败: {response.status_code}")

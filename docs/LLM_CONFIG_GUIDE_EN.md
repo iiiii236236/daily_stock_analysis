@@ -113,6 +113,11 @@ LITELLM_MODEL=openai/deepseek-ai/DeepSeek-V3
 ```
 
 ### Example 2: Using the Official DeepSeek API
+
+For GitHub Actions, an explicit `LITELLM_MODEL` selects the route; YAML deployments take precedence over channels, which take precedence over legacy credentials. `openai/<model ID>` uses `OPENAI_API_KEY` and `OPENAI_BASE_URL=https://api.deepseek.com/v1`; `deepseek/<model ID>` uses `DEEPSEEK_API_KEY` and LiteLLM's provider defaults. Verify the current model ID against the official model list before deployment.
+
+For a first smoke run, set `STOCK_LIST=600519`, `REPORT_TYPE=simple`, and `SINGLE_STOCK_NOTIFY=true` in Actions Variables, with the model key and `WECHAT_WEBHOOK_URL` in Secrets. Run `stocks-only` on the fix branch, then `full`. Stock failures still allow available reports to be delivered but now fail the run. Permanent HTTP failures no longer trigger the same route's non-stream retry. Logs include safe type/status/model/endpoint fields, and WeChat failures omit webhook URLs and response bodies. See the [detailed troubleshooting guide (Chinese)](deepseek-actions-troubleshooting.md).
+
 ```env
 # Fill in the API Key requested from the official DeepSeek platform
 DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx

@@ -22,6 +22,32 @@ _UNSUPPORTED_PARAM_MARKERS = (
     "does not support",
 )
 
+
+def llm_error_status(error: BaseException) -> Optional[int]:
+    """Read structured HTTP status, including errors raised while consuming a stream."""
+    seen = set()
+    current = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        for value in (
+            getattr(current, "status_code", None),
+            getattr(getattr(current, "response", None), "status_code", None),
+        ):
+            if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+                return value
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def is_non_retryable_llm_error(error: BaseException) -> bool:
+    """Permanent route failures cannot be repaired by switching off streaming.
+
+    Keep 400 stream/parameter compatibility recovery and transient failures intact.
+    Other configured deployments and fallback models can still be attempted.
+    """
+    return llm_error_status(error) in {401, 402, 403, 404, 422}
+
+
 _TEMPERATURE_VALUE_PATTERN = r"-?\d+(?:\.\d+)?"
 _ALLOWED_TEMPERATURE_PATTERNS = (
     re.compile(
@@ -81,6 +107,8 @@ def classify_litellm_generation_param_error(
     error: BaseException,
 ) -> Optional[GenerationParamRecovery]:
     """Classify explicit provider parameter errors into a safe one-shot recovery."""
+    if llm_error_status(error) in {401, 402, 403, 404}:
+        return None
     text = _normalized_error_text(error)
     if not text:
         return None

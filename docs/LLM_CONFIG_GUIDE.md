@@ -120,6 +120,9 @@ LITELLM_MODEL=openai/deepseek-ai/DeepSeek-V3
 ```
 
 ### 示例 2：使用 DeepSeek 官方接口
+
+GitHub Actions 配置优先级、600519 单股验证、企业微信与安全错误日志，见 [DeepSeek Actions 排障](deepseek-actions-troubleshooting.md)。模型当前可用性需以官方模型列表为准。
+
 ```env
 # 填入你在 DeepSeek 官方平台申请的 API Key
 DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx
